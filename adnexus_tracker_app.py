@@ -134,17 +134,21 @@ def calculate_unit_economics(mau, arpu, user_growth_rate, arpu_growth_rate, chur
         DataFrame with unit economics metrics
     """
     data = []
-    current_mau = mau
-    current_arpu = arpu
 
     for month in range(months):
+        month_number = month + 1
+
+        # Apply compound growth (consistent with projections)
+        projected_mau = mau * ((1 + user_growth_rate/100) ** month_number)
+        projected_arpu = arpu * ((1 + arpu_growth_rate/100) ** month_number)
+
         # Calculate LTV based on selected method
         if ltv_method == 'churn_based':
             # LTV = ARPU / churn_rate (geometric series)
-            ltv = current_arpu / (churn_rate / 100) if churn_rate > 0 else current_arpu * ltv_months
+            ltv = projected_arpu / (churn_rate / 100) if churn_rate > 0 else projected_arpu * ltv_months
         else:
             # Fixed months method
-            ltv = current_arpu * ltv_months
+            ltv = projected_arpu * ltv_months
 
         # Calculate CAC with linear increase
         cac = starting_cac + (month * cac_monthly_increase)
@@ -153,17 +157,13 @@ def calculate_unit_economics(mau, arpu, user_growth_rate, arpu_growth_rate, chur
         ltv_cac = ltv / cac if cac > 0 else 0
 
         data.append({
-            'Month': month + 1,
-            'MAU': int(current_mau),
-            'ARPU': round(current_arpu, 2),
+            'Month': month_number,
+            'MAU': int(projected_mau),
+            'ARPU': round(projected_arpu, 2),
             'LTV': round(ltv, 2),
             'CAC': round(cac, 2),
             'LTV/CAC': round(ltv_cac, 2)
         })
-
-        # Apply growth rates
-        current_mau *= (1 + user_growth_rate/100)
-        current_arpu *= (1 + arpu_growth_rate/100)
 
     return pd.DataFrame(data)
 
@@ -195,7 +195,11 @@ with tab1:
     col3.metric("Required Multiple", f"{growth_multiple:.1f}x", "From current")
     col4.metric("Current MAU", f"{current_mau:,}", f"+{int(current_mau * monthly_user_growth/100)} monthly")
     col5.metric("Current ARPU", f"₹{current_arpu}", f"+{monthly_arpu_growth}%")
-    col6.metric("Monthly Payment", f"₹{current_monthly_revenue * 0.25 * 0.05:.2f}L", "To Vinmo")
+
+    # Calculate current monthly payment with correct formula
+    current_net_revenue = current_monthly_revenue * (1 - redemption_rate/100)
+    current_payment = current_net_revenue * (revenue_share/100)
+    col6.metric("Monthly Payment", f"₹{current_payment:.2f}L", "To Vinmo")
     
     st.markdown("---")
     
@@ -493,15 +497,19 @@ with tab5:
     
     # Generate executive summary
     st.markdown("### Executive Summary")
-    
+
+    # Calculate current payment with correct formula
+    exec_current_net_revenue = current_monthly_revenue * (1 - redemption_rate/100)
+    exec_current_payment = exec_current_net_revenue * (revenue_share/100)
+
     summary = f"""
     **Investment Analysis as of {datetime.now().strftime('%B %d, %Y')}**
-    
+
     **Current Performance:**
     - Monthly Revenue: ₹{current_monthly_revenue} Lakhs
     - Monthly Active Users: {current_mau:,}
     - Average Revenue per User: ₹{current_arpu}
-    - Monthly Payment to Vinmo: ₹{current_monthly_revenue * 0.25 * 0.05:.2f} Lakhs
+    - Monthly Payment to Vinmo: ₹{exec_current_payment:.2f} Lakhs
     
     **Projections (at {monthly_user_growth}% monthly growth):**
     - Expected Repayment: {months_to_repay} months
