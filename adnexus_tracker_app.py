@@ -174,6 +174,10 @@ ltv_months = 6  # Months for LTV if using fixed method
 starting_cac = 30  # Initial Customer Acquisition Cost (₹)
 cac_monthly_increase = 2.0  # CAC increase per month (₹)
 
+# Calculate combined revenue growth rate (Revenue = MAU × ARPU)
+# Revenue growth = (1 + MAU_growth) × (1 + ARPU_growth) - 1
+revenue_growth_rate = ((1 + monthly_user_growth/100) * (1 + monthly_arpu_growth/100) - 1) * 100
+
 # Create main tabs
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📈 Overview", "💵 Cash Flow", "👥 Unit Economics", "⚠️ Risk Analysis", "📊 Reports", "🔧 Assumptions"])
 
@@ -182,7 +186,7 @@ with tab1:
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     # Calculate key metrics
-    df_projections = calculate_projections(current_monthly_revenue, monthly_user_growth,
+    df_projections = calculate_projections(current_monthly_revenue, revenue_growth_rate,
                                           redemption_rate=redemption_rate,
                                           revenue_share_pct=revenue_share)
     months_to_repay = len(df_projections)
@@ -190,7 +194,7 @@ with tab1:
     growth_multiple = final_revenue / current_monthly_revenue if current_monthly_revenue > 0 else 0
     
     # Display metrics
-    col1.metric("Current MRR", f"₹{current_monthly_revenue}L", f"+{monthly_user_growth}% growth")
+    col1.metric("Current MRR", f"₹{current_monthly_revenue}L", f"+{revenue_growth_rate:.1f}% growth")
     col2.metric("Months to Repay", f"{months_to_repay}", f"Target: 36")
     col3.metric("Required Multiple", f"{growth_multiple:.1f}x", "From current")
     col4.metric("Current MAU", f"{current_mau:,}", f"+{int(current_mau * monthly_user_growth/100)} monthly")
@@ -209,13 +213,13 @@ with tab1:
     with col1:
         st.subheader("📈 Revenue Growth Trajectory")
         
-        # Create multiple scenarios
+        # Create multiple scenarios (revenue growth rates)
         scenarios = {
             'Conservative (5%)': 5.0,
-            f'Current ({monthly_user_growth}%)': monthly_user_growth,
-            'Optimistic (10%)': 10.0
+            f'Current ({revenue_growth_rate:.1f}%)': revenue_growth_rate,
+            'Optimistic (12%)': 12.0
         }
-        
+
         fig = go.Figure()
         for name, rate in scenarios.items():
             df_scenario = calculate_projections(current_monthly_revenue, rate,
@@ -226,7 +230,7 @@ with tab1:
                 y=df_scenario['Gross Revenue (₹L)'],
                 name=name,
                 mode='lines',
-                line=dict(width=2 if rate == monthly_user_growth else 1)
+                line=dict(width=2 if abs(rate - revenue_growth_rate) < 0.01 else 1)
             ))
         
         fig.add_hline(y=141, line_dash="dash", line_color="red", 
@@ -270,7 +274,7 @@ with tab2:
     st.subheader("💵 Detailed Cash Flow Projections")
     
     # Cash flow table
-    df_cashflow = calculate_projections(current_monthly_revenue, monthly_user_growth,
+    df_cashflow = calculate_projections(current_monthly_revenue, revenue_growth_rate,
                                        redemption_rate=redemption_rate,
                                        revenue_share_pct=revenue_share, months=48)
     
@@ -409,7 +413,7 @@ with tab4:
         
         scenarios_data = {
             'Scenario': ['Pessimistic', 'Base Case', 'Optimistic', 'Best Case'],
-            'Growth Rate': [5.0, monthly_user_growth, 10.0, 12.0],
+            'Growth Rate': [5.0, revenue_growth_rate, 10.0, 12.0],
             'Probability': [20, 50, 25, 5],
             'Months to Repay': []
         }
@@ -511,7 +515,7 @@ with tab5:
     - Average Revenue per User: ₹{current_arpu}
     - Monthly Payment to Vinmo: ₹{exec_current_payment:.2f} Lakhs
     
-    **Projections (at {monthly_user_growth}% monthly growth):**
+    **Projections (at {revenue_growth_rate:.1f}% monthly revenue growth):**
     - Expected Repayment: {months_to_repay} months
     - Required Growth Multiple: {growth_multiple:.1f}x
     - Final Monthly Revenue: ₹{final_revenue:.1f} Lakhs
@@ -641,7 +645,7 @@ with tab6:
 
     # Display all assumptions in organized format
     assumptions_summary = f"""**Revenue Model:**
-- Gross Revenue Growth: {monthly_user_growth}% monthly
+- Gross Revenue Growth: {revenue_growth_rate:.2f}% monthly (MAU × ARPU growth)
 - Redemption Rate: {redemption_rate_input}%
 - Net Revenue: Gross × {100-redemption_rate_input}%
 - Payment to Investor: Net Revenue × {revenue_share_input}%
