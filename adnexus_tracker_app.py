@@ -65,42 +65,93 @@ revenue_share = st.sidebar.number_input("Revenue Share %", value=5.0, disabled=T
 equity_stake = st.sidebar.number_input("Equity Stake %", value=17.5, disabled=True)
 
 # Main calculation functions
-def calculate_projections(current_revenue, growth_rate, months=48):
-    """Calculate monthly revenue projections"""
+def calculate_projections(current_revenue, growth_rate, redemption_rate=50, revenue_share_pct=5, months=48):
+    """
+    Calculate monthly revenue projections until investment is repaid.
+
+    Args:
+        current_revenue: Starting monthly revenue (₹ Lakhs)
+        growth_rate: Monthly growth rate (%)
+        redemption_rate: Percentage of revenue that is redeemed (%, default: 50)
+        revenue_share_pct: Percentage of net revenue paid to investor (%, default: 5)
+        months: Maximum months to project (default: 48)
+
+    Returns:
+        DataFrame with monthly projections
+    """
     projections = []
     cumulative_payment = 0
-    
+
     for month in range(months):
-        revenue = current_revenue * ((1 + growth_rate/100) ** month)
-        net_revenue = revenue * 0.25  # 25% net margin
-        payment = net_revenue * 0.05  # 5% revenue share
+        # Month 1 should have 1 month of growth, not 0
+        month_number = month + 1
+
+        # Calculate gross revenue with compound growth
+        gross_revenue = current_revenue * ((1 + growth_rate/100) ** month_number)
+
+        # Calculate net revenue after redemptions
+        redemption_amount = gross_revenue * (redemption_rate / 100)
+        net_revenue = gross_revenue - redemption_amount
+
+        # Calculate payment to investor
+        payment = net_revenue * (revenue_share_pct / 100)
         cumulative_payment += payment
-        
+
         projections.append({
-            'Month': month + 1,
-            'Gross Revenue (₹L)': round(revenue, 2),
+            'Month': month_number,
+            'Gross Revenue (₹L)': round(gross_revenue, 2),
+            'Redemptions (₹L)': round(redemption_amount, 2),
             'Net Revenue (₹L)': round(net_revenue, 2),
             'Payment to Vinmo (₹L)': round(payment, 2),
             'Cumulative Paid (₹L)': round(cumulative_payment, 2),
             'Balance (₹L)': max(0, 75 - cumulative_payment)
         })
-        
+
         if cumulative_payment >= 75:
             break
-    
+
     return pd.DataFrame(projections)
 
-def calculate_unit_economics(mau, arpu, growth_rate, months=36):
-    """Calculate unit economics over time"""
+def calculate_unit_economics(mau, arpu, user_growth_rate, arpu_growth_rate, churn_rate,
+                             ltv_method='churn_based', ltv_months=6,
+                             starting_cac=30, cac_monthly_increase=2, months=36):
+    """
+    Calculate unit economics over time.
+
+    Args:
+        mau: Starting Monthly Active Users
+        arpu: Starting Average Revenue Per User (₹)
+        user_growth_rate: Monthly user growth (%)
+        arpu_growth_rate: Monthly ARPU growth (%)
+        churn_rate: Monthly churn rate (%)
+        ltv_method: 'churn_based' or 'fixed_months'
+        ltv_months: Months for LTV if using fixed method
+        starting_cac: Initial Customer Acquisition Cost (₹)
+        cac_monthly_increase: CAC increase per month (₹)
+        months: Months to project
+
+    Returns:
+        DataFrame with unit economics metrics
+    """
     data = []
     current_mau = mau
     current_arpu = arpu
-    
+
     for month in range(months):
-        ltv = current_arpu * 6  # 6-month average lifetime
-        cac = 30 + (month * 2)  # CAC increases over time
+        # Calculate LTV based on selected method
+        if ltv_method == 'churn_based':
+            # LTV = ARPU / churn_rate (geometric series)
+            ltv = current_arpu / (churn_rate / 100) if churn_rate > 0 else current_arpu * ltv_months
+        else:
+            # Fixed months method
+            ltv = current_arpu * ltv_months
+
+        # Calculate CAC with linear increase
+        cac = starting_cac + (month * cac_monthly_increase)
+
+        # Calculate LTV/CAC ratio
         ltv_cac = ltv / cac if cac > 0 else 0
-        
+
         data.append({
             'Month': month + 1,
             'MAU': int(current_mau),
@@ -109,21 +160,31 @@ def calculate_unit_economics(mau, arpu, growth_rate, months=36):
             'CAC': round(cac, 2),
             'LTV/CAC': round(ltv_cac, 2)
         })
-        
-        current_mau *= (1 + growth_rate/100)
-        current_arpu *= 1.01  # 1% monthly ARPU growth
-    
+
+        # Apply growth rates
+        current_mau *= (1 + user_growth_rate/100)
+        current_arpu *= (1 + arpu_growth_rate/100)
+
     return pd.DataFrame(data)
 
+# Default assumption parameters (can be overridden in Assumptions tab)
+redemption_rate = 50.0  # Percentage of gross revenue that is redeemed
+ltv_method = 'churn_based'  # LTV calculation method: 'churn_based' or 'fixed_months'
+ltv_months = 6  # Months for LTV if using fixed method
+starting_cac = 30  # Initial Customer Acquisition Cost (₹)
+cac_monthly_increase = 2.0  # CAC increase per month (₹)
+
 # Create main tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Overview", "💵 Cash Flow", "👥 Unit Economics", "⚠️ Risk Analysis", "📊 Reports"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📈 Overview", "💵 Cash Flow", "👥 Unit Economics", "⚠️ Risk Analysis", "📊 Reports", "🔧 Assumptions"])
 
 # Tab 1: Overview
 with tab1:
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     # Calculate key metrics
-    df_projections = calculate_projections(current_monthly_revenue, monthly_user_growth)
+    df_projections = calculate_projections(current_monthly_revenue, monthly_user_growth,
+                                          redemption_rate=redemption_rate,
+                                          revenue_share_pct=revenue_share)
     months_to_repay = len(df_projections)
     final_revenue = df_projections.iloc[-1]['Gross Revenue (₹L)'] if len(df_projections) > 0 else 0
     growth_multiple = final_revenue / current_monthly_revenue if current_monthly_revenue > 0 else 0
@@ -153,7 +214,9 @@ with tab1:
         
         fig = go.Figure()
         for name, rate in scenarios.items():
-            df_scenario = calculate_projections(current_monthly_revenue, rate, 48)
+            df_scenario = calculate_projections(current_monthly_revenue, rate,
+                                               redemption_rate=redemption_rate,
+                                               revenue_share_pct=revenue_share, months=48)
             fig.add_trace(go.Scatter(
                 x=df_scenario['Month'],
                 y=df_scenario['Gross Revenue (₹L)'],
@@ -203,7 +266,9 @@ with tab2:
     st.subheader("💵 Detailed Cash Flow Projections")
     
     # Cash flow table
-    df_cashflow = calculate_projections(current_monthly_revenue, monthly_user_growth, 48)
+    df_cashflow = calculate_projections(current_monthly_revenue, monthly_user_growth,
+                                       redemption_rate=redemption_rate,
+                                       revenue_share_pct=revenue_share, months=48)
     
     # Add quarterly summary
     df_cashflow['Quarter'] = (df_cashflow['Month'] - 1) // 3 + 1
@@ -248,7 +313,11 @@ with tab2:
 with tab3:
     st.subheader("👥 Unit Economics & User Metrics")
     
-    df_unit = calculate_unit_economics(current_mau, current_arpu, monthly_user_growth)
+    df_unit = calculate_unit_economics(current_mau, current_arpu, monthly_user_growth,
+                                       monthly_arpu_growth, churn_rate,
+                                       ltv_method=ltv_method, ltv_months=ltv_months,
+                                       starting_cac=starting_cac,
+                                       cac_monthly_increase=cac_monthly_increase)
     
     col1, col2 = st.columns(2)
     
@@ -338,18 +407,16 @@ with tab4:
             'Scenario': ['Pessimistic', 'Base Case', 'Optimistic', 'Best Case'],
             'Growth Rate': [5.0, monthly_user_growth, 10.0, 12.0],
             'Probability': [20, 50, 25, 5],
-            'Months to Repay': [],
-            'IRR': []
+            'Months to Repay': []
         }
         
         # Calculate months for each scenario
         for rate in scenarios_data['Growth Rate']:
-            df_temp = calculate_projections(current_monthly_revenue, rate)
+            df_temp = calculate_projections(current_monthly_revenue, rate,
+                                           redemption_rate=redemption_rate,
+                                           revenue_share_pct=revenue_share)
             months = len(df_temp)
             scenarios_data['Months to Repay'].append(months)
-            # Simple IRR approximation
-            irr = (0 if months > 36 else (36 - months) * 0.5) if months <= 48 else -5
-            scenarios_data['IRR'].append(f"{irr:.1f}%")
         
         df_scenarios = pd.DataFrame(scenarios_data)
         st.dataframe(df_scenarios, use_container_width=True)
@@ -370,7 +437,9 @@ with tab4:
         for churn in churn_rates:
             row = []
             for growth in growth_rates:
-                df_temp = calculate_projections(current_monthly_revenue, growth)
+                df_temp = calculate_projections(current_monthly_revenue, growth,
+                                               redemption_rate=redemption_rate,
+                                               revenue_share_pct=revenue_share)
                 months = len(df_temp)
                 row.append(months if months <= 60 else '>60')
             sensitivity_matrix.append(row)
@@ -488,6 +557,185 @@ with tab5:
             file_name=f"adnexus_all_data_{datetime.now().strftime('%Y%m%d')}.json",
             mime='application/json'
         )
+
+# Tab 6: Assumptions
+with tab6:
+    st.subheader("🔧 Business Assumptions & Parameters")
+
+    st.markdown("### 📊 Financial Model Parameters")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("#### Revenue Model")
+        redemption_rate_input = st.slider(
+            "Redemption Rate (%)",
+            min_value=0.0,
+            max_value=80.0,
+            value=redemption_rate,
+            step=1.0,
+            help="Percentage of gross revenue that is redeemed/returned",
+            key="redemption_rate_input"
+        )
+
+        revenue_share_input = st.slider(
+            "Revenue Share to Investor (%)",
+            min_value=0.0,
+            max_value=20.0,
+            value=revenue_share,
+            step=0.5,
+            help="Percentage of net revenue paid to Vinmo Ventures",
+            key="revenue_share_input"
+        )
+
+        # Show calculated effective rate
+        effective_rate = (100 - redemption_rate_input) / 100 * revenue_share_input
+        st.info(f"**Effective Payment Rate:** {effective_rate:.2f}% of gross revenue")
+
+    with col2:
+        st.markdown("#### Unit Economics")
+
+        ltv_method_input = st.radio(
+            "LTV Calculation Method",
+            options=['churn_based', 'fixed_months'],
+            format_func=lambda x: 'Churn-Based (Recommended)' if x == 'churn_based' else 'Fixed Months',
+            help="Churn-based uses: LTV = ARPU / churn_rate",
+            key="ltv_method_input",
+            index=0 if ltv_method == 'churn_based' else 1
+        )
+
+        if ltv_method_input == 'fixed_months':
+            ltv_months_input = st.slider("LTV Months", 1, 24, ltv_months, key="ltv_months_input")
+        else:
+            ltv_months_input = ltv_months  # Use default
+
+        starting_cac_input = st.number_input(
+            "Starting CAC (₹)",
+            min_value=0,
+            max_value=500,
+            value=starting_cac,
+            step=5,
+            help="Initial Customer Acquisition Cost",
+            key="starting_cac_input"
+        )
+
+        cac_increase_input = st.slider(
+            "CAC Monthly Increase (₹)",
+            min_value=0.0,
+            max_value=10.0,
+            value=cac_monthly_increase,
+            step=0.5,
+            help="How much CAC increases each month",
+            key="cac_increase_input"
+        )
+
+    st.markdown("---")
+    st.markdown("### 📋 Current Assumptions Summary")
+
+    # Display all assumptions in organized format
+    assumptions_summary = f"""**Revenue Model:**
+- Gross Revenue Growth: {monthly_user_growth}% monthly
+- Redemption Rate: {redemption_rate_input}%
+- Net Revenue: Gross × {100-redemption_rate_input}%
+- Payment to Investor: Net Revenue × {revenue_share_input}%
+- Effective Rate: {effective_rate:.2f}% of gross revenue
+
+**Growth Assumptions:**
+- User Growth: {monthly_user_growth}% monthly
+- ARPU Growth: {monthly_arpu_growth}% monthly
+- Churn Rate: {churn_rate}% monthly
+
+**Unit Economics:**
+- LTV Method: {"Churn-Based" if ltv_method_input == 'churn_based' else f"Fixed ({ltv_months_input} months)"}
+- Starting CAC: ₹{starting_cac_input}
+- CAC Increase: ₹{cac_increase_input}/month
+
+**Investment Terms:**
+- Investment Amount: ₹{investment_amount} Lakhs
+- Revenue Share: {revenue_share_input}%
+- Equity Stake: {equity_stake}%
+"""
+
+    st.text(assumptions_summary)
+
+    # Download assumptions
+    st.download_button(
+        label="📥 Download Assumptions",
+        data=assumptions_summary,
+        file_name=f"adnexus_assumptions_{datetime.now().strftime('%Y%m%d')}.txt",
+        mime='text/plain'
+    )
+
+    st.markdown("---")
+    st.markdown("### 💡 Assumptions Guide")
+
+    with st.expander("Understanding Redemption Rate"):
+        st.markdown("""
+**Redemption Rate** is the percentage of gross revenue that customers redeem/return.
+
+- Higher redemption = Lower net revenue = Longer repayment
+- Current: ~50% (meaning 50% of gross is redeemed)
+- Net Revenue = Gross × (100% - 50%) = Gross × 50%
+
+**Example:**
+- Gross Revenue: ₹10L
+- Redemption Rate: 50%
+- Redemptions: ₹10L × 50% = ₹5L
+- Net Revenue: ₹10L - ₹5L = ₹5L
+- Payment (5% of net): ₹5L × 5% = ₹0.25L
+        """)
+
+    with st.expander("Understanding LTV Calculation Methods"):
+        st.markdown("""
+**Churn-Based (Recommended):**
+- LTV = ARPU ÷ Churn Rate
+- Example: ₹100 ARPU, 20% churn → LTV = ₹100 / 0.20 = ₹500
+- Automatically adjusts when churn changes
+- More accurate representation of customer lifetime value
+
+**Fixed Months:**
+- LTV = ARPU × Number of Months
+- Example: ₹100 ARPU, 6 months → LTV = ₹600
+- Simple but doesn't account for churn
+- Useful for quick estimates
+
+**Note:** The churn-based method is more realistic for subscription businesses.
+        """)
+
+    with st.expander("Understanding CAC (Customer Acquisition Cost)"):
+        st.markdown("""
+**CAC** is the cost to acquire one new customer.
+
+- Lower CAC = More efficient marketing
+- CAC typically increases over time as easy channels saturate
+- Target: LTV/CAC ratio > 3 for healthy unit economics
+
+**Current Settings:**
+- Starting CAC: ₹{0}
+- Monthly Increase: ₹{1}/month
+- This means in Month 1 CAC = ₹{0}, Month 2 = ₹{2}, etc.
+
+**Why does CAC increase?**
+- Early adopters are easier to acquire
+- Marketing channels become saturated
+- Competition increases over time
+        """.format(starting_cac_input, cac_increase_input, starting_cac_input + cac_increase_input))
+
+    with st.expander("Understanding Revenue Share Model"):
+        st.markdown("""
+**How the Deal Works:**
+1. AdNexus generates gross revenue each month
+2. Customers redeem a portion (currently ~50%)
+3. Net Revenue = Gross Revenue - Redemptions
+4. Vinmo receives 5% of Net Revenue until ₹75L is repaid
+
+**Key Point:** This is a revenue share deal, NOT a profit share deal. Payments are made regardless of profitability.
+
+**Example Month:**
+- Gross Revenue: ₹10L
+- Redemptions (50%): ₹5L
+- Net Revenue: ₹5L
+- Payment to Vinmo (5%): ₹0.25L
+        """)
 
 # Footer
 st.markdown("---")
