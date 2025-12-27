@@ -3,14 +3,21 @@ Comprehensive tests for the 2 critical bug fixes:
 1. Overpayment regression
 2. Balance mismatch in executive summary
 
-These tests verify the ACTUAL app code, not a copy.
+⚠️  LIMITATION: These tests use a COPIED function (calculate_projections_from_app),
+not the actual app code, because Streamlit apps can't be imported directly.
+The copy is manually kept in sync with adnexus_tracker_app.py:131-200.
+
+To verify app accuracy:
+1. Check line 161: payment capped to remaining_balance ✓
+2. Check line 710: summary uses first_row_balance ✓
+3. Run integration test with live app (see checklist at end of file)
 """
 import pandas as pd
 import sys
 sys.path.insert(0, '/Users/aks/Adnexus_tracker')
 
-# We can't directly import from a Streamlit app, so we'll copy the function
-# BUT this time we'll test specific scenarios that would break the old code
+# We can't directly import from a Streamlit app, so we maintain a copy of the function
+# This copy is manually synced with the actual app code after fixes
 
 def calculate_projections_from_app(current_revenue, growth_rate, redemption_rate=50, revenue_share_pct=5, months=120, current_month=1, investment_amount=75.0, already_paid=0.0):
     """
@@ -272,3 +279,31 @@ print(f"  ✅ Summary balance matches table balance (no mismatch)")
 print(f"  ✅ Edge cases handled correctly")
 print(f"  ✅ Backward compatible with already_paid = 0")
 print("=" * 80)
+
+
+# ============================================================================
+# INTEGRATION TEST CHECKLIST (Manual Verification)
+# ============================================================================
+# Since we can't import Streamlit app code, manually verify:
+#
+# 1. Launch app: streamlit run adnexus_tracker_app.py
+#
+# 2. Test overpayment scenario:
+#    - Set: already_paid=74.8, investment=75, revenue=10
+#    - Verify: first row payment = 0.2L (not 0.25L)
+#    - Verify: cumulative = 75.0L (not 75.05L)
+#    - Expected: No overpayment beyond investment_amount
+#
+# 3. Test balance consistency:
+#    - Set: already_paid=10, investment=75
+#    - Check first table row balance (should be ~64.625L)
+#    - Download executive summary
+#    - Verify: summary balance = table balance (both ~64.625L, not 65.0L)
+#
+# 4. Test edge cases:
+#    - already_paid=0: verify baseline still works
+#    - already_paid=75: verify 0 payment, 0 balance
+#    - Revenue spike: verify payment caps to remaining balance
+#
+# Last verified: December 27, 2025
+# ============================================================================
