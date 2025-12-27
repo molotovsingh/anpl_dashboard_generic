@@ -158,7 +158,8 @@ def calculate_projections(current_revenue, growth_rate, redemption_rate=50, reve
 
     # Add Month 0 (current month) with NO growth - shows current state
     net_revenue_current = current_revenue * (1 - redemption_rate/100)
-    payment_current = min(net_revenue_current * (revenue_share_pct / 100), investment_amount)
+    remaining_balance = investment_amount - cumulative_payment
+    payment_current = min(net_revenue_current * (revenue_share_pct / 100), remaining_balance)
     cumulative_payment += payment_current
 
     projections.append({
@@ -705,6 +706,9 @@ with tab5:
     # Format repayment timeline consistently with UI
     repayment_status = "Incomplete - may take longer" if repayment_incomplete else "On track"
 
+    # Get actual balance from first row of projections (post-payment, matches table)
+    first_row_balance = df_projections.iloc[0]['Balance (₹L)']
+
     summary = f"""
     **Investment Analysis as of {datetime.now().strftime('%B %d, %Y')}**
 
@@ -723,8 +727,8 @@ with tab5:
 
     **Investment Structure:**
     - Total Investment: ₹{investment_amount} Lakhs
-    - Already Paid: ₹{already_paid} Lakhs
-    - Remaining Balance: ₹{investment_amount - already_paid:.2f} Lakhs
+    - Already Paid (before current month): ₹{already_paid} Lakhs
+    - Remaining Balance (after current month): ₹{first_row_balance:.2f} Lakhs
     - Revenue Share: {revenue_share}%
     - Equity Stake: {equity_stake}%
 
