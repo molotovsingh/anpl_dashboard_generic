@@ -479,10 +479,10 @@ with tab2:
                 f"⚠️ Repayment not completed within {len(df_cashflow)} projected months (limit). "
                 f"Remaining balance: ₹{cashflow_final_balance:.2f}L."
             )
-        elif months_to_repay <= 36:
-            st.success(f"✅ On track to repay within target (36 months)")
+        elif months_remaining <= 36:
+            st.success(f"✅ On track to repay within target (36 months remaining)")
         else:
-            st.warning(f"⚠️ Repayment will take {months_to_repay - 36} months longer than target")
+            st.warning(f"⚠️ Repayment will take {months_remaining - 36} months longer than target")
         
         milestone = investment_amount / 2
         break_even_month = df_cashflow[df_cashflow['Cumulative Paid (₹L)'] >= milestone].iloc[0]['Month'] if len(df_cashflow[df_cashflow['Cumulative Paid (₹L)'] >= milestone]) > 0 else None
@@ -587,7 +587,7 @@ with tab4:
             'Scenario': ['Pessimistic', 'Base Case', 'Optimistic', 'Best Case'],
             'Growth Rate': [5.0, revenue_growth_rate, 10.0, 12.0],
             'Probability': [20, 50, 25, 5],
-            'Months to Repay': []
+            'Months Remaining': []
         }
         
         # Calculate months for each scenario
@@ -601,10 +601,11 @@ with tab4:
                                            investment_amount=investment_amount,
                                            already_paid=already_paid)
             months = len(df_temp)
+            months_remaining_scenario = months - 1  # Exclude current month
             final_bal = df_temp.iloc[-1]['Balance (₹L)'] if len(df_temp) > 0 else investment_amount
             incomplete = final_bal > 0.01
-            scenarios_data['Months to Repay'].append(f'>{months}' if incomplete else months)
-            scenario_months_lower_bound.append(months)
+            scenarios_data['Months Remaining'].append(f'>{months_remaining_scenario}' if incomplete else months_remaining_scenario)
+            scenario_months_lower_bound.append(months_remaining_scenario)
             scenario_incomplete.append(incomplete)
         
         df_scenarios = pd.DataFrame(scenarios_data)
