@@ -115,6 +115,14 @@ investment_amount = st.sidebar.number_input(
     step=1.0,
     help="Total amount to be repaid via revenue share"
 )
+already_paid = st.sidebar.number_input(
+    "Already Paid to Date (₹ Lakhs)",
+    min_value=0.0,
+    max_value=investment_amount,
+    value=0.0,
+    step=0.5,
+    help="Amount already repaid before current month. Use this if you're mid-investment to track remaining timeline accurately."
+)
 revenue_share = st.sidebar.number_input("Revenue Share %", value=5.0, disabled=True)
 equity_stake = st.sidebar.number_input("Equity Stake %", value=17.5, disabled=True)
 
@@ -128,7 +136,7 @@ st.info(
 st.markdown("---")
 
 # Main calculation functions
-def calculate_projections(current_revenue, growth_rate, redemption_rate=50, revenue_share_pct=5, months=120, current_month=1, investment_amount=75.0):
+def calculate_projections(current_revenue, growth_rate, redemption_rate=50, revenue_share_pct=5, months=120, current_month=1, investment_amount=75.0, already_paid=0.0):
     """
     Calculate monthly revenue projections until investment is repaid.
 
@@ -140,12 +148,13 @@ def calculate_projections(current_revenue, growth_rate, redemption_rate=50, reve
         months: Maximum months to project (default: 120)
         current_month: Current month number in the timeline (default: 1)
         investment_amount: Total investment to be repaid (₹ Lakhs, default: 75.0)
+        already_paid: Amount already repaid before current month (₹ Lakhs, default: 0.0)
 
     Returns:
         DataFrame with monthly projections
     """
     projections = []
-    cumulative_payment = 0
+    cumulative_payment = already_paid  # Start from prior payments
 
     # Add Month 0 (current month) with NO growth - shows current state
     net_revenue_current = current_revenue * (1 - redemption_rate/100)
@@ -304,8 +313,11 @@ with tab1:
                                           redemption_rate=redemption_rate,
                                           revenue_share_pct=revenue_share,
                                           current_month=current_month,
-                                          investment_amount=investment_amount)
+                                          investment_amount=investment_amount,
+                                          already_paid=already_paid)
     months_to_repay = len(df_projections)
+    months_remaining = len(df_projections) - 1  # Exclude current month row
+    final_month = df_projections.iloc[-1]['Month'] if len(df_projections) > 0 else current_month
     final_revenue = df_projections.iloc[-1]['Gross Revenue (₹L)'] if len(df_projections) > 0 else 0
     growth_multiple = final_revenue / current_monthly_revenue if current_monthly_revenue > 0 else 0
 
@@ -322,11 +334,17 @@ with tab1:
 
     # Display metrics
     col1.metric("Current MRR", f"₹{current_monthly_revenue}L", f"+{revenue_growth_rate:.1f}% growth")
-    repay_display = f">{months_to_repay}" if repayment_incomplete else f"{months_to_repay}"
-    col2.metric("Months to Repay", repay_display, f"Target: 36")
-    col3.metric("Required Multiple", f"{growth_multiple:.1f}x", "From current")
-    col4.metric("Current MAU", f"{current_mau:,}", f"+{int(current_mau * monthly_user_growth/100)} monthly")
-    col5.metric("Current ARPU", f"₹{current_arpu}", f"+{monthly_arpu_growth}%")
+
+    # Show months remaining with clarity (excluding current month)
+    remaining_display = f">{months_remaining}" if repayment_incomplete else f"{months_remaining}"
+    col2.metric("Months Remaining", remaining_display, f"Target: 36")
+
+    # Show final month number
+    final_month_display = f">M{final_month}" if repayment_incomplete else f"M{final_month}"
+    col3.metric("Completes At", final_month_display, f"From M{current_month}")
+
+    col4.metric("Required Multiple", f"{growth_multiple:.1f}x", "From current")
+    col5.metric("Current MAU", f"{current_mau:,}", f"+{int(current_mau * monthly_user_growth/100)} monthly")
 
     # Calculate current monthly payment with correct formula
     current_net_revenue = current_monthly_revenue * (1 - redemption_rate/100)
@@ -354,7 +372,8 @@ with tab1:
                                                redemption_rate=redemption_rate,
                                                revenue_share_pct=revenue_share,
                                                current_month=current_month,
-                                               investment_amount=investment_amount)
+                                               investment_amount=investment_amount,
+                                               already_paid=already_paid)
             fig.add_trace(go.Scatter(
                 x=df_scenario['Month'],
                 y=df_scenario['Gross Revenue (₹L)'],
@@ -418,7 +437,8 @@ with tab2:
                                        redemption_rate=redemption_rate,
                                        revenue_share_pct=revenue_share,
                                        current_month=current_month,
-                                       investment_amount=investment_amount)
+                                       investment_amount=investment_amount,
+                                       already_paid=already_paid)
     
     # Add quarterly summary
     df_cashflow['Quarter'] = (df_cashflow['Month'] - 1) // 3 + 1
@@ -577,7 +597,8 @@ with tab4:
                                            redemption_rate=redemption_rate,
                                            revenue_share_pct=revenue_share,
                                            current_month=current_month,
-                                           investment_amount=investment_amount)
+                                           investment_amount=investment_amount,
+                                           already_paid=already_paid)
             months = len(df_temp)
             final_bal = df_temp.iloc[-1]['Balance (₹L)'] if len(df_temp) > 0 else investment_amount
             incomplete = final_bal > 0.01
@@ -615,7 +636,8 @@ with tab4:
                                                redemption_rate=redemption,  # Now uses redemption!
                                                revenue_share_pct=revenue_share,
                                                current_month=current_month,
-                                               investment_amount=investment_amount)
+                                               investment_amount=investment_amount,
+                                               already_paid=already_paid)
                 months = len(df_temp)
                 # Check if incomplete
                 final_bal = df_temp.iloc[-1]['Balance (₹L)'] if len(df_temp) > 0 else investment_amount
@@ -680,6 +702,9 @@ with tab5:
     exec_current_net_revenue = current_monthly_revenue * (1 - redemption_rate/100)
     exec_current_payment = exec_current_net_revenue * (revenue_share/100)
 
+    # Format repayment timeline consistently with UI
+    repayment_status = "Incomplete - may take longer" if repayment_incomplete else "On track"
+
     summary = f"""
     **Investment Analysis as of {datetime.now().strftime('%B %d, %Y')}**
 
@@ -688,21 +713,25 @@ with tab5:
     - Monthly Active Users: {current_mau:,}
     - Average Revenue per User: ₹{current_arpu}
     - Monthly Payment to Vinmo: ₹{exec_current_payment:.2f} Lakhs
-    
+
     **Projections (at {revenue_growth_rate:.1f}% monthly revenue growth):**
-    - Expected Repayment: {months_to_repay} months
+    - Months Remaining: {remaining_display} months
+    - Completes At: {final_month_display}
+    - Status: {repayment_status}
     - Required Growth Multiple: {growth_multiple:.1f}x
     - Final Monthly Revenue: ₹{final_revenue:.1f} Lakhs
-    
+
     **Investment Structure:**
     - Total Investment: ₹{investment_amount} Lakhs
+    - Already Paid: ₹{already_paid} Lakhs
+    - Remaining Balance: ₹{investment_amount - already_paid:.2f} Lakhs
     - Revenue Share: {revenue_share}%
     - Equity Stake: {equity_stake}%
-    
+
     **Risk Assessment:**
-    - {'✅ Low Risk' if months_to_repay <= 30 else '⚠️ Moderate Risk' if months_to_repay <= 42 else '🔴 High Risk'}
-    - {'On track for target timeline' if months_to_repay <= 36 else f'Behind target by {months_to_repay - 36} months'}
-    
+    - {'✅ Low Risk' if (not repayment_incomplete and months_remaining <= 30) else '⚠️ Moderate Risk' if (not repayment_incomplete and months_remaining <= 42) else '🔴 High Risk'}
+    - {'On track for target timeline' if (not repayment_incomplete and months_remaining <= 36) else f'Behind target' if not repayment_incomplete else 'Requires longer timeline or improved growth'}
+
     **Recommendation:**
     {'Continue current growth strategy' if monthly_user_growth >= 7.5 else 'Consider increasing marketing spend and user acquisition efforts'}
     """
